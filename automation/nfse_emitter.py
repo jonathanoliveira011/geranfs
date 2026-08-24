@@ -119,6 +119,22 @@ class NfseEmitter:
         await resultado.wait_for(state="visible", timeout=8000)
         await resultado.click()
 
+    async def _avancar(self, page: Page, url_contem: str) -> None:
+        """Clica em Avançar e confirma que a URL realmente mudou, com uma nova tentativa
+        caso a navegação não ocorra (ex: validação client-side ainda não concluída)."""
+        for tentativa in range(2):
+            await page.get_by_role("button", name="Avançar").click()
+            try:
+                await page.wait_for_url(f"**{url_contem}**", timeout=8000)
+                await page.wait_for_load_state("networkidle")
+                await page.wait_for_timeout(1500)
+                return
+            except Exception:
+                if tentativa == 0:
+                    await page.wait_for_timeout(1500)
+                    continue
+                raise
+
     async def _chosen_escolher(self, page: Page, chosen_id: str, termo_busca: str) -> None:
         await page.locator(f"#{chosen_id}").click()
         await page.wait_for_timeout(600)
@@ -168,7 +184,13 @@ class NfseEmitter:
 
         await page.locator("#Tomador_Inscricao").fill(config.tomador_cnpj)
         await page.locator("#Tomador_Inscricao").press("Tab")
-        await page.wait_for_timeout(2000)
+
+        # aguarda a busca AJAX do CNPJ preencher o nome (não usar espera fixa - servidor
+        # mais lento pode demorar mais que o esperado e deixar o Avançar sem efeito)
+        await page.wait_for_function(
+            "document.querySelector('#Tomador_Nome')?.value?.trim().length > 0",
+            timeout=15000,
+        )
         await self._dismiss_confirm_dialog(page)
 
         # reforça (pode resetar após o confirm dialog acima)
@@ -176,9 +198,7 @@ class NfseEmitter:
         await page.wait_for_timeout(500)
         await self._dismiss_confirm_dialog(page)
 
-        await page.get_by_role("button", name="Avançar").click()
-        await page.wait_for_load_state("networkidle")
-        await page.wait_for_timeout(1500)
+        await self._avancar(page, "/DPS/Servico")
 
         return data_competencia
 
@@ -212,9 +232,7 @@ class NfseEmitter:
         await page.locator("#Complemento_InformacoesComplementares").fill(info_complementares)
         await page.wait_for_timeout(500)
 
-        await page.get_by_role("button", name="Avançar").click()
-        await page.wait_for_load_state("networkidle")
-        await page.wait_for_timeout(1500)
+        await self._avancar(page, "/DPS/Tributacao")
 
     async def _preencher_valores(self, page: Page, valor_total: float) -> None:
         valor_formatado = f"{valor_total:.2f}".replace(".", ",")
@@ -223,9 +241,7 @@ class NfseEmitter:
         await page.wait_for_timeout(1500)
         await self._dismiss_confirm_dialog(page)
 
-        await page.get_by_role("button", name="Avançar").click()
-        await page.wait_for_load_state("networkidle")
-        await page.wait_for_timeout(1500)
+        await self._avancar(page, "/DPS/EmitirNFSe")
 
     async def emitir(self, quantidade: int) -> EmissaoResultado:
         valor_total = round(quantidade * config.valor_unitario, 2)
@@ -253,6 +269,7 @@ class NfseEmitter:
             (debug_dir / f"erro_{timestamp}.html").write_text(
                 await page.content(), encoding="utf-8"
             )
+            (debug_dir / f"erro_{timestamp}.txt").write_text(page.url, encoding="utf-8")
             raise
 
         return EmissaoResultado(chave_acesso=chave_acesso.strip(), valor_total=valor_total)
