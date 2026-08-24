@@ -177,13 +177,13 @@ class NfseEmitter:
         await page.wait_for_timeout(700)
         await self._dismiss_confirm_dialog(page)
 
-        # Município do prestador é fixo (single vínculo) - só precisa "confirmar" o widget
-        await page.locator("#Prestador_EnderecoNacional_CodigoMunicipio_chosen").click()
-        await page.wait_for_timeout(700)
-        confirmou = await self._dismiss_confirm_dialog(page) or False
-        if confirmou:
-            await page.locator("#Prestador_EnderecoNacional_CodigoMunicipio_chosen").click()
-            await page.wait_for_timeout(700)
+        # Município do prestador é fixo (único vínculo) e é auto-preenchido por uma
+        # busca JS assíncrona - espera o valor real aparecer em vez de confiar em timing.
+        await page.wait_for_function(
+            "document.querySelector('#Prestador_EnderecoNacional_CodigoMunicipio')?.value",
+            timeout=15000,
+        )
+        await self._dismiss_confirm_dialog(page)
 
         await page.locator("#Tomador_Inscricao").fill(config.tomador_cnpj)
         await page.locator("#Tomador_Inscricao").press("Tab")
