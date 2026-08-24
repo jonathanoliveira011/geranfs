@@ -177,12 +177,21 @@ class NfseEmitter:
         await page.wait_for_timeout(700)
         await self._dismiss_confirm_dialog(page)
 
-        # Município do prestador é fixo (único vínculo) e é auto-preenchido por uma
-        # busca JS assíncrona - espera o valor real aparecer em vez de confiar em timing.
-        await page.wait_for_function(
-            "document.querySelector('#Prestador_EnderecoNacional_CodigoMunicipio')?.value",
-            timeout=15000,
-        )
+        # Município do prestador é fixo (único vínculo), mas só é preenchido depois de
+        # clicar no widget (dispara a lógica JS que seleciona a única opção existente).
+        for _tentativa_municipio in range(3):
+            await page.locator("#Prestador_EnderecoNacional_CodigoMunicipio_chosen").click()
+            try:
+                await page.wait_for_function(
+                    "document.querySelector('#Prestador_EnderecoNacional_CodigoMunicipio')?.value",
+                    timeout=6000,
+                )
+                break
+            except Exception:
+                await self._dismiss_confirm_dialog(page)
+                await page.wait_for_timeout(1000)
+        else:
+            raise RuntimeError("Município do prestador não foi preenchido após 3 tentativas")
         await self._dismiss_confirm_dialog(page)
 
         await page.locator("#Tomador_Inscricao").fill(config.tomador_cnpj)
