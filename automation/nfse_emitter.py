@@ -101,13 +101,15 @@ class NfseEmitter:
             await page.wait_for_timeout(600)
 
     async def _select2_escolher(self, page: Page, select_id: str, termo_busca: str) -> None:
+        await page.locator(f"#{select_id}").wait_for(state="attached", timeout=15000)
         container = (
             page.locator(f"#{select_id}")
             .locator("xpath=following-sibling::span[1]")
             .locator(".select2-selection")
         )
+        await container.wait_for(state="visible", timeout=15000)
         await container.click()
-        await page.wait_for_timeout(400)
+        await page.wait_for_timeout(600)
 
         search = page.locator(".select2-search__field")
         await search.fill(termo_busca)
@@ -230,17 +232,27 @@ class NfseEmitter:
 
         page = await self._context.new_page()
 
-        data_competencia = await self._preencher_pessoas(page)
-        await self._preencher_servico(page, data_competencia)
-        await self._preencher_valores(page, valor_total)
+        try:
+            data_competencia = await self._preencher_pessoas(page)
+            await self._preencher_servico(page, data_competencia)
+            await self._preencher_valores(page, valor_total)
 
-        # Tela final de revisão: o botão "Emitir NFS-e" é um <a id="btnProsseguir">
-        await page.locator("#btnProsseguir").click()
-        await page.wait_for_load_state("networkidle")
-        await page.wait_for_timeout(2000)
+            # Tela final de revisão: o botão "Emitir NFS-e" é um <a id="btnProsseguir">
+            await page.locator("#btnProsseguir").click()
+            await page.wait_for_load_state("networkidle")
+            await page.wait_for_timeout(2000)
 
-        chave_acesso = await page.locator(
-            "text=Chave de Acesso:"
-        ).locator("xpath=following::*[1]").inner_text()
+            chave_acesso = await page.locator(
+                "text=Chave de Acesso:"
+            ).locator("xpath=following::*[1]").inner_text()
+        except Exception:
+            debug_dir = Path(config.browser_state_path).parent / "debug"
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            await page.screenshot(path=str(debug_dir / f"erro_{timestamp}.png"), full_page=True)
+            (debug_dir / f"erro_{timestamp}.html").write_text(
+                await page.content(), encoding="utf-8"
+            )
+            raise
 
         return EmissaoResultado(chave_acesso=chave_acesso.strip(), valor_total=valor_total)
