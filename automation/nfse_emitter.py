@@ -83,7 +83,9 @@ class NfseEmitter:
                 f"Nenhuma sessão salva em {state_path}. Exporte os cookies primeiro."
             )
 
-        self._context = await self._browser.new_context(storage_state=str(state_path))
+        self._context = await self._browser.new_context(
+            storage_state=str(state_path), reduced_motion="reduce"
+        )
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
@@ -122,15 +124,15 @@ class NfseEmitter:
     async def _avancar(self, page: Page, url_contem: str) -> None:
         """Clica em Avançar e confirma que a URL realmente mudou, com uma nova tentativa
         caso a navegação não ocorra (ex: validação client-side ainda não concluída)."""
-        for tentativa in range(2):
+        for tentativa in range(3):
             await page.get_by_role("button", name="Avançar").click()
             try:
-                await page.wait_for_url(f"**{url_contem}**", timeout=8000)
+                await page.wait_for_url(f"**{url_contem}**", timeout=10000)
                 await page.wait_for_load_state("networkidle")
                 await page.wait_for_timeout(1500)
                 return
             except Exception:
-                if tentativa == 0:
+                if tentativa < 2:
                     await page.wait_for_timeout(1500)
                     continue
                 raise
