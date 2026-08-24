@@ -11,6 +11,7 @@ Fluxo mapeado manualmente em 22/08/2026 (4 abas): Pessoas -> Serviço -> Valores
 -> Emitir NFS-e (revisão final).
 """
 
+import asyncio
 import datetime
 from dataclasses import dataclass
 from pathlib import Path
@@ -250,6 +251,26 @@ class NfseEmitter:
 
         page = await self._context.new_page()
 
+        eventos_debug: list[str] = []
+
+        async def _on_dialog(dialog):
+            eventos_debug.append(f"DIALOG: {dialog.type} - {dialog.message}")
+            await dialog.accept()
+
+        page.on("dialog", lambda d: asyncio.ensure_future(_on_dialog(d)))
+        page.on("console", lambda m: eventos_debug.append(f"CONSOLE[{m.type}]: {m.text}"))
+        page.on("pageerror", lambda e: eventos_debug.append(f"PAGEERROR: {e}"))
+        page.on(
+            "requestfailed",
+            lambda r: eventos_debug.append(f"REQFAILED: {r.url} - {r.failure}"),
+        )
+        page.on(
+            "response",
+            lambda r: eventos_debug.append(f"RESPONSE: {r.status} {r.url}")
+            if r.request.method == "POST" or r.status >= 400
+            else None,
+        )
+
         try:
             data_competencia = await self._preencher_pessoas(page)
             await self._preencher_servico(page, data_competencia)
@@ -272,6 +293,9 @@ class NfseEmitter:
                 await page.content(), encoding="utf-8"
             )
             (debug_dir / f"erro_{timestamp}.txt").write_text(page.url, encoding="utf-8")
+            (debug_dir / f"erro_{timestamp}_eventos.log").write_text(
+                "\n".join(eventos_debug), encoding="utf-8"
+            )
             raise
 
         return EmissaoResultado(chave_acesso=chave_acesso.strip(), valor_total=valor_total)
