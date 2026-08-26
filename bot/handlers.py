@@ -88,13 +88,13 @@ async def confirmar_emissao(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             resultado = await emitter.emitir(quantidade)
     except SessaoExpiradaError:
         await query.edit_message_text(
-            "A sessão de login expirou. Avise o Oliver para reautenticar o bot."
+            "A sessão de login expirou. Avise o Jonathan para reautenticar o bot."
         )
         return
     except Exception:
         logger.exception("Falha ao emitir NFS-e")
         await query.edit_message_text(
-            "Erro ao emitir a nota. Vou avisar o Oliver para verificar."
+            "Erro ao emitir a nota. Vou avisar o Jonathan para verificar."
         )
         return
 
@@ -135,7 +135,7 @@ async def keep_alive_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         await context.bot.send_message(
             chat_id=config.group_chat_id,
             text=(
-                "⚠️ A sessão do gov.br expirou. Peça para o Oliver reexportar os "
+                "⚠️ A sessão do gov.br expirou. Peça para o Jonathan reexportar os "
                 "cookies para o bot voltar a emitir notas."
             ),
         )
