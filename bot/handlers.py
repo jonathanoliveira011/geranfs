@@ -11,6 +11,12 @@ from telegram.ext import (
     filters,
 )
 
+from automation import historico
+from automation.instance_lock import (
+    atualizar_heartbeat,
+    garantir_instancia_unica,
+    liberar_lock,
+)
 from automation.nfse_emitter import NfseEmitter, SessaoExpiradaError, sessao_esta_ativa
 from config import config
 
@@ -18,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 AGUARDANDO_QUANTIDADE = 1
 KEEP_ALIVE_INTERVALO_SEGUNDOS = 15 * 60
+HEARTBEAT_INTERVALO_SEGUNDOS = 45
 
 
 def _autorizado(update: Update) -> bool:
@@ -81,6 +88,12 @@ async def confirmar_emissao(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.edit_message_text("Sessão expirada, use /nota novamente.")
         return
 
+    # Trava contra duplo clique / reenvio: só a primeira confirmação prossegue.
+    if context.user_data.get("emissao_em_andamento"):
+        await query.answer("Emissão já em andamento, aguarde...", show_alert=True)
+        return
+    context.user_data["emissao_em_andamento"] = True
+
     await query.edit_message_text("Emitindo nota fiscal, aguarde...")
 
     try:
@@ -97,6 +110,11 @@ async def confirmar_emissao(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             "Erro ao emitir a nota. Vou avisar o Jonathan para verificar."
         )
         return
+    finally:
+        context.user_data["emissao_em_andamento"] = False
+        context.user_data.pop("quantidade", None)
+
+    historico.registrar(quantidade, resultado.valor_total, resultado.chave_acesso)
 
     await query.edit_message_text(
         f"✅ Nota fiscal emitida com sucesso!\n\n"
@@ -104,6 +122,38 @@ async def confirmar_emissao(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         f"Valor total: R$ {resultado.valor_total:.2f}\n\n"
         f"O PDF pode ser baixado no portal nfse.gov.br quando precisar."
     )
+
+
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _autorizado(update):
+        return
+
+    aguardando = await update.message.reply_text("Checando sessão do gov.br...")
+
+    try:
+        ativa = await sessao_esta_ativa()
+    except Exception:
+        logger.exception("Erro ao checar status da sessão")
+        await aguardando.edit_text("Não foi possível checar a sessão agora, tenta de novo.")
+        return
+
+    if ativa:
+        texto = "✅ Sessão do gov.br ativa. O bot está pronto para emitir notas."
+    else:
+        texto = (
+            "⚠️ Sessão do gov.br expirada. Peça para o Jonathan reexportar os cookies."
+        )
+
+    ultimas = historico.ultimas(3)
+    if ultimas:
+        texto += "\n\nÚltimas notas emitidas:"
+        for item in ultimas:
+            texto += (
+                f"\n• {item['data_hora']} — {item['quantidade']} peças — "
+                f"R$ {item['valor_total']} — {item['chave_acesso'][-8:]}"
+            )
+
+    await aguardando.edit_text(texto)
 
 
 async def chatid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -142,12 +192,30 @@ async def keep_alive_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     context.bot_data["sessao_avisada_expirada"] = True
 
 
+async def heartbeat_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    atualizar_heartbeat()
+
+
+async def _liberar_lock_no_shutdown(application: Application) -> None:
+    liberar_lock()
+
+
 def build_application() -> Application:
-    application = Application.builder().token(config.telegram_bot_token).build()
+    garantir_instancia_unica()
+
+    application = (
+        Application.builder()
+        .token(config.telegram_bot_token)
+        .post_shutdown(_liberar_lock_no_shutdown)
+        .build()
+    )
 
     if application.job_queue is not None:
         application.job_queue.run_repeating(
             keep_alive_job, interval=KEEP_ALIVE_INTERVALO_SEGUNDOS, first=60
+        )
+        application.job_queue.run_repeating(
+            heartbeat_job, interval=HEARTBEAT_INTERVALO_SEGUNDOS, first=0
         )
 
     conv_handler = ConversationHandler(
@@ -163,5 +231,6 @@ def build_application() -> Application:
     application.add_handler(conv_handler)
     application.add_handler(CallbackQueryHandler(confirmar_emissao))
     application.add_handler(CommandHandler("chatid", chatid))
+    application.add_handler(CommandHandler("status", status))
 
     return application

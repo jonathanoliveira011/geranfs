@@ -7,7 +7,14 @@ Bot de Telegram para emissão de NFS-e (portal NFS-e Nacional, gov.br) a partir 
 1. No grupo do Telegram, `/nota` → o bot pergunta a quantidade de peças.
 2. Bot mostra um resumo (quantidade × valor unitário fixo = total) com botões Confirmar/Cancelar.
 3. Ao confirmar, o Playwright abre o portal nfse.gov.br já autenticado (sessão reaproveitada, ver abaixo) e preenche o formulário de emissão completa: prestador (fixo), tomador (fixo), serviço (fixo), valor calculado.
-4. Bot responde com a chave de acesso da NFS-e emitida. O PDF **não** é anexado automaticamente (ver limitações).
+4. Bot responde com a chave de acesso da NFS-e emitida e registra no histórico local (`data/historico.csv`). O PDF **não** é anexado automaticamente (ver limitações).
+
+## Comandos
+
+- `/nota` — inicia a emissão (pergunta quantidade → confirma → emite)
+- `/status` — checa se a sessão do gov.br está ativa e mostra as últimas 3 notas emitidas
+- `/cancelar` — cancela um fluxo de `/nota` em andamento
+- `/chatid` — mostra o ID do chat atual (útil para configurar `TELEGRAM_GROUP_CHAT_ID`)
 
 ## Limitações importantes (por quê o fluxo não é 100% automático)
 
@@ -44,7 +51,14 @@ Para testar a automação sem o Telegram (ex: depurar o preenchimento do formul�
 | `PLAYWRIGHT_HEADLESS` | `true` em produção; `false` só para depuração visual |
 | `BROWSER_STATE_PATH` | Onde fica a sessão exportada (`data/govbr_session.json`) |
 
-`GOVBR_CPF`/`GOVBR_SENHA` no `.env.example` não são mais usados pelo fluxo atual (a automação não faz login) — podem ficar em branco.
+## Proteção contra múltiplas instâncias
+
+O bot recusa iniciar se já existir outra instância com heartbeat recente (arquivo
+`data/bot.lock`, atualizado a cada 45s, considerado "vivo" por até 90s). Isso evita o
+erro `Conflict: terminated by other getUpdates request` que acontece quando um deploy
+deixa o container antigo rodando junto com o novo. Se o bot se recusar a iniciar após
+um deploy e você tiver certeza de que não há outra instância rodando, apague
+`data/bot.lock` manualmente pelo terminal do serviço.
 
 ## Deploy no EasyPanel
 
